@@ -247,9 +247,7 @@ form > div {
 }
 
 .input-field label.active,
-[type="checkbox"] + label,
-label.control-label[for=assessment_github_submission_enabled],
-label.control-label[for=assessment_disable_handins] {
+[type="checkbox"] + label {
   color: #444;
   font-weight: 600;
 }
@@ -645,12 +643,13 @@ p.attention {
 }
 ul.moss-list {
   list-style: none;
-  background: $autolab-subtle-gray;
   border-radius: 5px;
 }
 ul.moss-list > li {
   cursor: pointer;
+  background: $autolab-subtle-gray;
   padding: 15px;
+  margin-bottom: 15px;
 }
 ul.moss-list > li > h5 {
   font-weight: bold;
@@ -685,14 +684,6 @@ ul.moss-inner-list > li > input[type="checkbox"]:checked ~ div {
   color: #c90;
   cursor: pointer;
   text-decoration: underline;
-}
-
-div.field_with_errors {
-  display: inline;
-}
-
-div.field_with_errors {
-  display: inline;
 }
 
 .table-info {
@@ -899,7 +890,12 @@ body.autolab {
   .h3,
   .h4,
   .h5,
-  .h6 {
+  .h6,
+  button,
+  input,
+  optgroup,
+  select,
+  textarea {
     font-family: "Source Sans Pro", sans-serif;
   }
 
@@ -992,6 +988,13 @@ input[type="search"] {
   label.active {
     font-size: 18px;
   }
+}
+
+#error-block {
+  color: red;
+  font-size: 15px;
+  margin-top: 0;
+  margin-bottom: 10px;
 }
 
 .help-block,
@@ -1479,6 +1482,10 @@ table.sub td, th {
 
 .submission-history-button:hover {
   color: white !important;
+}
+
+.oauth-btn:hover {
+  background-color: $autolab-subtle-gray !important;
 }
 
 .error-header {

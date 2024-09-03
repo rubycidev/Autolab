@@ -7,6 +7,7 @@ var sort_column = "title";
 
 var slickgrid_options = {
   enableCellNavigation: true,
+  enableColumnReorder: false,
   rowHeight: ROW_HEIGHT,
   defaultColumnWidth: 65,
   syncColumnCellResize: true,
@@ -40,32 +41,18 @@ var slickgrid_options = {
     case "normal":
       switch (data[submission_status_key]) {
       case "submitted":
-        if (columnDef.before_grading_deadline) {
-          tip = 'Grading is in-progress. <br>'  
-          tip += 'Final scores will be visible here after the grading deadline (specified as an assessment property). <br>'
-          tip += 'Meanwhile, check the assessment gradesheet for updates.<br>';
-          value = '<a data-tooltip="' + tip + '" class="tooltipped past-grading-deadline icon-time"></a>';
-        }
         break;
 
       case "not_submitted":
-        if (columnDef.before_grading_deadline) {
-          value = "<a data-tooltip='No submission was made.' class='tooltipped icon-exclamation-sign'></a>";
-        } else {
-          tip = user + ' has not made any submissions for ' + asmt + '. <br>';
-          tip += 'The last date for submission by ' + user + ' was ' + data[end_at_key] + '.';
-          value = '<a data-tooltip="' + tip + '" class="tooltipped not-submitted">' + value + '</a>';
-        }
+        tip = user + ' has not made any submissions for ' + asmt + '. <br>';
+        tip += 'The last date for submission by ' + user + ' was ' + data[end_at_key] + '.';
+        value = '<a data-tooltip="' + tip + '" class="tooltipped not-submitted">' + value + '</a>';
         break;
 
       case "not_yet_submitted":
-        if (columnDef.before_grading_deadline) {
-          value = "<a data-title='No submission has been made yet.' class='tip icon-exclamation-sign'></a>";
-        } else {
-          tip = user + ' has not yet made any submissions for ' + asmt + '. ';
-          tip += 'The last date for submission by ' + user + ' is ' + data[end_at_key] + '.';
-          value = '<a data-tooltip="' + tip + '" class="tooltipped not-yet-submitted">' + value + '</a>';
-        }
+        tip = user + ' has not yet made any submissions for ' + asmt + '. <br>';
+        tip += 'The last date for submission by ' + user + ' is ' + data[end_at_key] + '.';
+        value = '<a data-tooltip="' + tip + '" class="tooltipped not-yet-submitted">' + value + '</a>';
         break;
       }
     }
@@ -117,13 +104,23 @@ $(function () {
 
   // column header tooltips
   for (var i = 0; i < columns.length; i++) {
-    columns[i].headerCssClass = "tip";
-    columns[i].toolTip = columns[i].name;
+    if (columns[i].name == "Version") {
+      columns[i].toolTip = columns[i-1].name + " " + columns[i].name;
+    } else {
+      columns[i].toolTip = columns[i].name;
+    }
   }
 
   var dataView = new Slick.Data.DataView();
   grid = new Slick.Grid("#gradebook", dataView, columns, slickgrid_options);
-  new Slick.Controls.ColumnPicker(columns, grid, options);
+  var autoColumnResize = new Slick.Plugins.AutoColumnSize(300);
+  grid.registerPlugin(autoColumnResize);
+
+  let hiddenColumns = localStorage.getItem("hiddenColumns") ? localStorage.getItem("hiddenColumns") : [];
+  let hiddenNumberColumns = hiddenColumns.length === 0 ? [] : hiddenColumns.split(',').map(Number);
+  let hiddenNumberSet = [... new Set(hiddenNumberColumns)];
+  let visibleColumns = columns.filter((_, i) => !hiddenNumberSet.includes(i));
+
 
   grid.onSort.subscribe(function (e, args) {
     sort_column = args.sortCol.field;
@@ -164,18 +161,66 @@ $(function () {
   });
   $(window).resize();
 
-  grid.onMouseEnter.subscribe(function(e, args) {
-    $('.tooltipped', e.target).tooltip({
-      position: 'top',
-      delay: 100,
-      html: true
-    });
-  });
-
-  $('.tooltipped').tooltip({
+  const tooltipOpts = {
     position: 'top',
     delay: 100,
     html: true
+  };
+  grid.onMouseEnter.subscribe(function(e, args) {
+    // Since Materialize's tooltip method was overwritten by jquery-ui
+    M.Tooltip.init(document.querySelectorAll(".tooltipped"), tooltipOpts);
   });
 
+  for (var i = 0; i < columns.length; i++) {
+    columns[i].header = {
+      menu: {
+        items: [
+          {
+            title: "Hide Column",
+            command: "hide",
+            data: i
+          },
+          {
+            title: "Unhide Columns",
+            command: "unhide"
+          },
+          {
+            title: "Force fit columns",
+            command: "autoresize"
+          }
+        ]
+      }
+    };
+  }
+
+  var headerMenuPlugin = new Slick.Plugins.HeaderMenu({});
+
+  headerMenuPlugin.onCommand.subscribe(function(e, args) {
+    if (args.command === "hide") {
+      hiddenColumns = localStorage.getItem("hiddenColumns") ? localStorage.getItem("hiddenColumns") : [];
+      let hiddenNumberColumns = hiddenColumns.length === 0 ? [] : hiddenColumns.split(',').map(Number);
+      hiddenNumberColumns.push(args.item.data);
+      let hiddenNumberSet = [... new Set(hiddenNumberColumns)];
+      visibleColumns = columns.filter((_, i) => !hiddenNumberSet.includes(i));
+      localStorage.setItem("hiddenColumns", hiddenNumberSet.toString());
+      grid.setColumns(visibleColumns);
+    }
+    else if (args.command === "unhide") {
+      hiddenColumns = [];
+      visibleColumns = columns;
+      localStorage.clear();
+      grid.setColumns(visibleColumns);
+    }
+    else if (args.command === "autoresize") {
+      let autoresize = localStorage.getItem("autoresize")
+      if (autoresize) {
+        grid.setOptions({forceFitColumns: !autoresize});
+        grid.autosizeColumns();
+      }
+      localStorage.setItem("autoresize", autoresize);
+    }
+  });
+
+  grid.registerPlugin(headerMenuPlugin);
+  grid.setColumns(visibleColumns);
 })

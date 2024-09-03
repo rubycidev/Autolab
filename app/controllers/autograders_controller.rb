@@ -4,6 +4,7 @@
 class AutogradersController < ApplicationController
   before_action :set_assessment
   before_action :set_assessment_breadcrumb, only: [:edit]
+  before_action :set_edit_assessment_breadcrumb, only: [:edit]
   before_action :set_autograder, except: [:create]
 
   action_auth_level :create, :instructor
@@ -15,11 +16,13 @@ class AutogradersController < ApplicationController
       a.release_score = true
     end
     if @autograder.save
-      flash[:success] = "Autograder Created"
-      redirect_to([:edit, @course, @assessment, :autograder]) and return
+      flash[:success] = "Autograder created."
+      redirect_to(edit_course_assessment_autograder_path(@course, @assessment))
     else
-      flash[:error] = "Autograder could not be created"
-      redirect_to([:edit, @course, @assessment]) and return
+      flash[:error] = "Autograder could not be created.<br>"
+      flash[:error] += @autograder.errors.full_messages.join("<br>")
+      flash[:html_safe] = true
+      redirect_to(edit_course_assessment_path(@course, @assessment))
     end
   end
 
@@ -29,26 +32,30 @@ class AutogradersController < ApplicationController
   action_auth_level :update, :instructor
   def update
     if @autograder.update(autograder_params)
-      flash[:success] = "Autograder saved!"
+      flash[:success] = "Autograder saved."
       begin
         upload
       rescue StandardError
         flash[:error] = "Autograder could not be uploaded."
       end
     else
-      flash[:error] = "Autograder could not be saved."
+      flash[:error] = "Autograder could not be saved.<br>"
+      flash[:error] += @autograder.errors.full_messages.join("<br>")
+      flash[:html_safe] = true
     end
-    redirect_to([:edit, @course, @assessment, :autograder]) and return
+    redirect_to(edit_course_assessment_autograder_path(@course, @assessment))
   end
 
   action_auth_level :destroy, :instructor
   def destroy
     if @autograder.destroy
       flash[:success] = "Autograder destroyed."
-      redirect_to([:edit, @course, @assessment]) and return
+      redirect_to(edit_course_assessment_path(@course, @assessment))
     else
       flash[:error] = "Autograder could not be destroyed."
-      redirect_to([:edit, @course, @assessment, :autograder]) and return
+      flash[:error] += @autograder.errors.full_messages.join("<br>")
+      flash[:html_safe] = true
+      redirect_to(edit_course_assessment_autograder_path(@course, @assessment))
     end
   end
 
@@ -73,13 +80,9 @@ class AutogradersController < ApplicationController
 
 private
 
-  def set_assessment_breadcrumb
-    @breadcrumbs << (view_context.link_to "Edit Assessment", [:edit, @course, @assessment])
-  end
-
   def set_autograder
     @autograder = @assessment.autograder
-    redirect_to([@course, @assessment]) if @autograder.nil?
+    redirect_to(course_assessment_path(@course, @assessment)) if @autograder.nil?
   end
 
   def autograder_params

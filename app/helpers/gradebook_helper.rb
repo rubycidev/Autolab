@@ -15,15 +15,15 @@ module GradebookHelper
         sortable: true, width: 100, cssClass: "last_name",
         headerCssClass: "last_name" },
       { id: "course_number", name: "Course &#8470;", field: "course_number",
-        sortable: true, width: 100 },
+        sortable: true, width: 120 },
       { id: "lecture", name: "Lecture", field: "lecture",
         sortable: true, width: 100 },
       { id: "section", name: "Section", field: "section",
         sortable: true, width: 100 },
       { id: "grace_days", name: "Grace Days", field: "grace_days",
-        sortable: true, width: 100 },
+        sortable: true, width: 150 },
       { id: "late_days", name: "Penalty Late Days", field: "late_days",
-        sortable: true, width: 100 }
+        sortable: true, width: 150 }
     ]
 
     course.assessment_categories.each do |cat|
@@ -35,15 +35,19 @@ module GradebookHelper
 
         columns << { id: asmt.name, name: asmt.display_name, field: asmt.name,
                      sortable: true, cssClass: "computed assessment_final_score",
-                     headerCssClass: "assessment_final_score",
-                     before_grading_deadline: matrix.before_grading_deadline?(asmt.id) }
+                     headerCssClass: "assessment_final_score", width: 150 }
+
+        columns << { id: "#{asmt.name}_version", name: "Version",
+                     field: "#{asmt.name}_version",
+                     sortable: true, cssClass: "computed assessment_version",
+                     headerCssClass: "assessment_version", width: 100 }
       end
 
       # category average column
-      columns << { id: cat, name: cat + " Average",
+      columns << { id: cat, name: "#{cat} Average",
                    field: "#{cat}_category_average",
                    sortable: true, cssClass: "computed category_average",
-                   headerCssClass: "category_average", width: 100 }
+                   headerCssClass: "category_average", width: 180 }
     end
 
     # course average column
@@ -90,6 +94,8 @@ module GradebookHelper
         next unless matrix.has_assessment? a.id
 
         cell = matrix.cell(a.id, cud.id)
+        aud = a.assessment_user_data.find_by(course_user_datum_id: cud.id)
+        row["#{a.name}_version"] = aud&.latest_submission&.version
         row["#{a.name}_history_url"] = history_url(cud, a)
         row[a.name] = round cell["final_score"]
         row["#{a.name}_submission_status"] = cell["submission_status"]
@@ -128,9 +134,12 @@ module GradebookHelper
     header = %w(Email first_name last_name Lecture Section School Major Year grace_days_used penalty_late_days)
     course.assessment_categories.each do |cat|
       next unless matrix.has_category? cat
+
       course.assessments_with_category(cat).each do |asmt|
         next unless matrix.has_assessment? asmt.id
+
         header << asmt.name
+        header << "version"
       end
       header << "#{cat} Average"
     end
@@ -141,12 +150,12 @@ module GradebookHelper
 
   def formatted_status(status)
     case status
-      when Float
-        round status
-      when String
-        status
-      else
-        throw "FATAL: AUD status must be Float or String; was #{status.class}"
+    when Float
+      round status
+    when String
+      status
+    else
+      throw "FATAL: AUD status must be Float or String; was #{status.class}"
     end
   end
 
@@ -171,6 +180,7 @@ module GradebookHelper
             cell = matrix.cell(asmt.id, cud.id)
 
             row << formatted_status(cell["status"])
+            row << cell["version"]
             grace_days += cell["grace_days"]
             late_days += cell["late_days"]
           end

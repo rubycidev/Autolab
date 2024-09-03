@@ -7,8 +7,8 @@
   overflow: hidden;
 }
 
-.row {
-  max-height: calc(100vh - 173px);
+#speedgrader {
+  max-height: calc(100vh - 178px);
 }
 
 .submission-controls select {
@@ -35,7 +35,7 @@
 .code-table {
   background: #fcfcfc;
   border: 1px solid $autolab-highlight-gray;
-  max-height: calc(100vh - 230px);
+  max-height: calc(100vh - 260px);
   overflow: auto;
 }
 
@@ -500,6 +500,31 @@
   margin-bottom:10px;
 }
 
+/* Diff Viewer Styling CSS */
+#diff-viewer tr {
+  border-bottom: none;
+}
+#diff-viewer td {
+  padding: 0;
+}
+#diff-viewer .hljs {
+  overflow-x: visible;
+}
+
+// Hide the "changed" box
+#diff-viewer .d2h-changed {
+  display: none;
+}
+
+// Make the diff viewer scrollable
+#diff-viewer .d2h-file-side-diff {
+  overflow-y: scroll;
+  max-height: calc(100vh - 235px);
+}
+#diff-viewer .d2h-code-side-linenumber {
+  position: static;
+}
+
 /* Annotation Pane Styling CSS */
 #annotationPane{
   display: flex;
@@ -861,9 +886,6 @@
 .ui-menu .ui-menu-item {
   font-family: "Source Sans Pro", sans-serif;
   font-size: 16px;
-  padding-top: 0.5rem !important;
-  padding-bottom: 0.5rem !important;
-
 }
 .ui-menu-item.ui-state-focus{
   background: rgba(211, 211, 211, 0.526) !important;
@@ -893,6 +915,14 @@
   font-weight: bold;
 }
 
+/* Disable Bootstrap styling to allow for scrolling within annotations and
+ * grades sidebars in file viewer
+ * (allows clicking on the scrollbar)
+ */
+.drag-target.right-aligned {
+  display: none;
+}
+
 /* Tooltip */
 span > .material-icons {
   vertical-align: middle;
@@ -904,5 +934,8 @@ span > .material-icons {
   font-size: 14px !important;
   box-shadow: 0.5px 0.5px 0.5px 0.5px grey !important;
   border-color: white !important;
-} 
+}
 
+.hljs-comment span {
+  color: var($autolab-highlight-comments) !important;
+}

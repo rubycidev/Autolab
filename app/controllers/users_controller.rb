@@ -7,6 +7,7 @@ class UsersController < ApplicationController
   before_action :set_user,
                 only: [:github_oauth, :github_revoke, :lti_launch_initialize,
                        :lti_launch_link_course]
+  before_action :set_users_list_breadcrumb, except: %i[index]
 
   # GET /users
   action_auth_level :index, :student
@@ -36,6 +37,8 @@ class UsersController < ApplicationController
       redirect_to(users_path) && return
     end
 
+    @hover_assessment_date = user.hover_assessment_date
+
     if current_user.administrator?
       # if current user is admin, show whatever he requests
       @user = user
@@ -49,7 +52,7 @@ class UsersController < ApplicationController
         next unless cud.instructor?
 
         user_cud =
-          cud.course.course_user_data.where(user: user).first
+          cud.course.course_user_data.where(user:).first
         user_cuds << user_cud unless user_cud.nil?
       end
 
@@ -125,7 +128,7 @@ class UsersController < ApplicationController
   # GET users/:id/edit
   action_auth_level :edit, :student
   def edit
-    user = User.find(params[:id])
+    user = User.find_by(id: params[:id])
     if user.nil?
       flash[:error] = "Failed to edit user: user does not exist."
       redirect_to(users_path) && return
@@ -140,12 +143,59 @@ class UsersController < ApplicationController
     else
       @user = current_user
     end
+
+    # Do it ad-hoc here, since this is the only place we need it
+    @breadcrumbs << (view_context.link_to @user.display_name, user_path(@user))
+  end
+
+  action_auth_level :download_all_submissions, :student
+  def download_all_submissions
+    user = User.find(params[:id])
+    submissions = if params[:final]
+                    Submission.latest.where(course_user_datum: CourseUserDatum.where(user_id: user))
+                  else
+                    Submission.where(course_user_datum: CourseUserDatum.where(user_id: user))
+                  end
+    submissions = submissions.select do |s|
+      p = s.handin_file_path
+      is_disabled = s.course_user_datum.course.is_disabled?
+      !p.nil? && File.exist?(p) && File.readable?(p) && !is_disabled
+    end
+    if submissions.empty?
+      flash[:error] = "There are no submissions to download."
+      redirect_to(user_path(user)) && return
+    end
+
+    current_time = Time.current
+    filename = if params[:final]
+                 "autolab_final_submissions_#{current_time.strftime('%Y-%m-%d')}"
+               else
+                 "autolab_all_submissions_#{current_time.strftime('%Y-%m-%d')}"
+               end
+
+    temp_file = Tempfile.new("autolab_submissions.zip")
+    Zip::File.open(temp_file.path, Zip::File::CREATE) do |zipfile|
+      submissions.each do |s|
+        p = s.handin_file_path
+        course_name = s.course_user_datum.course.name
+        assignment_name = s.assessment.name
+        course_directory = "#{filename}/#{course_name}"
+        assignment_directory = "#{course_directory}/#{assignment_name}"
+        entry_name = download_filename(p, assignment_name)
+        zipfile.add(File.join(assignment_directory, entry_name), p)
+      end
+    end
+
+    send_file(temp_file.path,
+              type: "application/zip",
+              disposition: "attachment", # tell browser to download
+              filename: "#{filename}.zip")
   end
 
   # PATCH users/:id/
   action_auth_level :update, :student
   def update
-    user = User.find(params[:id])
+    user = User.find_by(id: params[:id])
     if user.nil?
       flash[:error] = "Failed to update user: user does not exist."
       redirect_to(users_path) && return
@@ -188,7 +238,7 @@ class UsersController < ApplicationController
       redirect_to(users_path) && return
     end
 
-    user = User.find(params[:id])
+    user = User.find_by(id: params[:id])
     if user.nil?
       flash[:error] = "Failed to delete user: user doesn't exist."
       redirect_to(users_path) && return
@@ -220,7 +270,7 @@ class UsersController < ApplicationController
     @listing = { current: [], completed: [], upcoming: [] }
 
     courses_for_user.each do |course|
-      next if course.disabled?
+      next if course.is_disabled?
 
       course_cud = CourseUserDatum.find_cud_for_course(course, @user.id)
       next unless course_cud.has_auth_level?(:course_assistant)
@@ -281,7 +331,7 @@ class UsersController < ApplicationController
     authorize_url_params = {
       redirect_uri: "#{hostname}/users/github_oauth_callback",
       scope: "repo",
-      state: state
+      state:
     }
     redirect_to @gh_client.auth_code.authorize_url(authorize_url_params)
   end
@@ -304,6 +354,7 @@ class UsersController < ApplicationController
       flash[:error] = "Error with Github OAuth (invalid state), please try again."
       redirect_to(root_path) && return
     end
+    oauth_user = github_integration.user
 
     begin
       # Results in exception if invalid
@@ -315,9 +366,9 @@ class UsersController < ApplicationController
     end
 
     access_token = token.to_hash[:access_token]
-    github_integration.update!(access_token: access_token, oauth_state: nil)
+    github_integration.update!(access_token:, oauth_state: nil)
     flash[:success] = "Successfully connected with Github."
-    redirect_to(root_path) && return
+    redirect_to(user_path(id: oauth_user.id)) && return
   end
 
   action_auth_level :github_revoke, :student
@@ -333,7 +384,66 @@ class UsersController < ApplicationController
     (redirect_to user_path(id: @user.id)) && return
   end
 
+  action_auth_level :change_password_for_user, :administrator
+  def change_password_for_user
+    user = User.find(params[:id])
+    raw, enc = Devise.token_generator.generate(User, :reset_password_token)
+    user.reset_password_token = enc
+    user.reset_password_sent_at = Time.current
+    user.save(validate: false)
+    Devise.sign_in_after_reset_password = false
+    user_reset_link = edit_password_url(user, reset_password_token: raw)
+    admin_reset_link = update_password_for_user_user_path(user:)
+    flash[:success] =
+      "Click " \
+      "#{view_context.link_to 'here', admin_reset_link, method: 'get'} " \
+      "to reset #{user.display_name}'s password " \
+      "<br>Or copy this link for the user to reset their own password: "\
+      "#{user_reset_link}"
+    flash[:html_safe] = true
+    redirect_to(user_path)
+  end
+
+  def update_password_for_user
+    @user = User.find_by(id: params[:id])
+    return if params[:user].nil? || params[:user].is_a?(String) || @user.nil?
+
+    if params[:user][:password] != params[:user][:password_confirmation]
+      flash[:error] = "Passwords do not match"
+    elsif @user.update(password: params[:user][:password])
+      flash[:success] = "Password changed successfully"
+      redirect_to(root_path)
+    else
+      flash[:error] = "Password #{@user.errors[:password][0]}"
+    end
+  end
+
+  action_auth_level :update_display_settings, :student
+  def update_display_settings
+    @user = current_user
+    return if params[:user].nil? || params[:user].is_a?(String) || @user.nil?
+
+    if @user.update(hover_assessment_date: params[:user][:hover_assessment_date])
+      flash[:success] = "Successfully updated display settings"
+      (redirect_to user_path(id: @user.id)) && return
+    else
+      flash[:error] = @user.errors[:hover_assessment_date][0].to_s
+    end
+  end
+
 private
+
+  # Given the path to a file, return the filename to use when the user downloads it
+  # path should be of the form .../<ver>_<handin> or .../annotated_<ver>_<handin>
+  # returns <course_name>_<assignment_name>_<ver>_<handin>
+  # or annotated_<course_name>_<assignment_name>_<ver>_<handin>
+  def download_filename(path, assignment_name)
+    basename = File.basename path
+    basename_parts = basename.split("_")
+    basename_parts.insert(-3, assignment_name)
+    download_name = basename_parts[-3..]
+    download_name.join("_")
+  end
 
   def new_user_params
     params.require(:user).permit(:email, :first_name, :last_name)
@@ -364,7 +474,7 @@ private
   end
 
   def set_user
-    @user = User.find(params[:id])
+    @user = User.find_by(id: params[:id])
     return unless @user.nil?
 
     flash[:error] = "User doesn't exist."

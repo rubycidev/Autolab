@@ -40,6 +40,14 @@ Instructors and course assistants are never marked as dropped. User accounts are
 
 Once a student is added to the roster for a course, then that course becomes visible to the student when they visit the Autolab site. A student can be enrolled in an arbitrary number of Autolab courses.
 
+## Access Codes
+
+To allow students to self-enroll in a course, you can generate an _access code_ for the course. The access code is a short string of letters and digits that is unique to the course.
+
+To do so, select the "Allow self-enrollment" checkbox on the course settings page. The access code will be displayed on the course homepage.
+
+Students can then enroll in the course by clicking the "Join Course" button in the user dropdown menu and entering the access code.
+
 ## Labs (Assessments)
 
 A _lab_ (or _assessment_) is broadly defined as a submission set; it is anything that your students make submissions (handins) for. This could be a programming assignment, a typed homework, or even an in-class exam. You can create labs from scratch, or reuse them from previous semesters. See the companion [Guide For Lab Authors](/lab/) for info on writing and installing labs.
@@ -54,7 +62,7 @@ Labs can be _autograded_ or not, at your discretion. When a student submits to a
 
 ## Important Dates
 
-A lab has a _start date_, _due date_, _end date_ and _grading deadline_. The link to a lab becomes visible to students after the start date (it's always visible to instructors). Students can submit until the due date without penalty or consuming grace days. Submission is turned off after the end date. Grades are included in the gradebook's category and course averages only after the grading deadline.
+A lab has a _start date_, _due date_ and _end date_. The link to a lab becomes visible to students after the start date (it's always visible to instructors). Students can submit until the due date without penalty or consuming grace days. Submissions are disabled after the end date.
 
 ## Handins/Submissions
 
@@ -92,34 +100,6 @@ _Grades_ come in a number of different forms:
 5. _Course Average:_ By default, the course average is average of all category averages, but can be overridden. See below.
 
 Submissions can be classified as one of three types: "Normal", "No Grade" or "Excused". A "No Grade" submission will show up in the gradebook as NG and a zero will be used when calculating averages. An "Excused" submission will show up in the gradebook as EXC and will not be used when calculating averages.
-
-## Overriding Raw Score Calculations
-
-Autolab computes raw scores for a lab with a Ruby function called `raw_score`. The default is the sum of the individual problem scores. But you can change this by providing your own `raw_score` function in `<labname>.rb` file. For example, to override the raw_score calculation for a lab called `malloclab`, you might add the following `raw_score` function to `malloclab/malloclab.rb`:
-
-```ruby
-# In malloclab/malloclab.rb file
-def raw_score(score)
-    perfindex = score["Autograded Score"].to_f()
-    heap = score["Heap Checker"].to_f()
-    style = score["Style"].to_f()
-    deduct = score["CorrectnessDeductions"].to_f()
-    perfpoints = perfindex
-
-    # perfindex below 50 gets autograded score of 0.
-    if perfindex < 50.0 then
-        perfpoints = 0
-    else
-        perfpoints = perfindex
-    end
-
-    return perfpoints + heap + style + deduct
-end
-```
-
-This particular lab has four problems called "Autograded Score", "Heap Checker", "Style", and "CorrectnessDeductions". An "Autograded Score" less than 50 is set to zero when the raw score is calculated.
-
-Note: To make this change live, you must select the "Reload config file" option on the `malloclab` page.
 
 ## Overriding Category and Course Averages
 
@@ -168,44 +148,6 @@ In this course, the course average is the sum of the category averages for "Lab"
 
 Note: To make these changes live, you must select "Reload course config file" on the "Manage course" page.
 
-## Customizing Submision File MIME Type Check
-
-By default, Autolab does not perform MIME type check for submission files. However, it allows instructors to define their own MIME type check method in the assessment config file. The corresponding function is `checkMimeType` in `<labname>.rb` file. For example, to prevent students from submitting a binary file to the assessment `malloclab`, you might add the following `checkMimeType` function to `malloclab/malloclab.rb`:
-
-```ruby
-# In malloclab/malloclab.rb file
-def checkMimeType(contentType, fileName)
-    return contentType != "application/octet-stream"
-end
-```
-
-As of now, the only way to provide a more informative message to student is to raise an error:
-
-```ruby
-# In malloclab/malloclab.rb file
-def checkMimeType(contentType, fileName)
-    raise "Do not submit binary files!" if contentType == "application/octet-stream"
-    
-    return true
-end
-```
-
-This results in the following error message to students when they attempt to submit binary files.
-
-![MIME Type Check](/images/mime_type_check.png)
-
-Alternatively, you can use the file name to do file type check. The following snippet prevents students from submitting python files:
-
-```ruby
-def checkMimeType(contentType, fileName)
-    return fileName.split(".")[-1] != "py"
-end
-```
-
-Note that this function does not have access to Rails controller attributes such as `flash` or `params`. Attempts to access what's beyond the arguments passed to the function will result in an error.
-
-Note: To make this change live, you must select the "Reload config file" option on the `malloclab` page.
-
 ## Handin History
 
 For each lab, students can view all of their submissions, including any source code, and the problem scores, penalties, and total scores associated with those submissions, via the _handin history_ page.
@@ -228,6 +170,34 @@ The _gradebook_ comes in two forms. The _student gradebook_ displays the grades 
 
 For the gradebook calculations, submissions are classified as one of three types: "Normal", "No Grade" or "Excused". A "No Grade" submission will show up in the gradebook as NG and a zero will be used when calculating averages. An "Excused" submission will show up in the gradebook as EXC and will not be used when calculating averages.
 
+To auto-expand a column in the _gradebook_, double-click the edge of that column header.
+
 ## Releasing Grades
 
 Manually assigned grades are by default not released, and therefore not visible to students. You can release grades on an individual basis while grading, or release all available grades in bulk by using the "Release all grades" option. You can also reverse this process using the "Withdraw all grades" option. (The word "withdraw" is perhaps unfortunate. No grades are ever deleted. They are simply withdrawn from the student's view.)
+
+## File Manager
+
+Displays files within a course and allows you to rename, delete, and add files automatically via an interface.
+
+You can view all courses that you are an instructor of and all associated files.
+
+You can access the File Manager under Admin Course after clicking Manage Course.
+
+Note:
+
+- You cannot create folders or upload files in the root Courses directory. To create a course, you should navigate to Create New Course via the Manage Autolab dropdown.
+
+- You cannot rename files in the root Courses directory. To rename a course, you should navigate to the course, click Manage Course, and click Course Settings.
+
+- You cannot upload files that are larger than 1 GB.
+
+- You cannot create a folder or upload a file with a name that already exists.
+
+- Deleting a folder will also delete all of its contents.
+
+- Downloading a folder will create a tar with all of its contents.
+
+- Download Selected downloads each of the selected files/folders separately.
+
+- When clicking on a file, it will be automatically downloaded if it is larger than 1GB or a binary file. Otherwise, the file contents will be displayed.

@@ -1,7 +1,7 @@
+require "archive"
 require "association_cache"
 require "fileutils"
 require "utilities"
-
 class Assessment < ApplicationRecord
   # Mass-assignment
   # attr_protected :name
@@ -37,7 +37,7 @@ class Assessment < ApplicationRecord
   validates :group_size, numericality: { only_integer: true, greater_than_or_equal_to: 1,
                                          allow_nil: true }
   validates :name, :display_name, :due_at, :end_at, :start_at,
-            :grading_deadline, :category_name, :max_size, :max_submissions, presence: true
+            :category_name, :max_size, :max_submissions, presence: true
 
   # Callbacks
   trim_field :name, :display_name, :handin_filename, :handin_directory, :handout, :writeup
@@ -49,8 +49,8 @@ class Assessment < ApplicationRecord
   # Constants
   ORDERING = "due_at ASC, name ASC".freeze
   RELEASED = "start_at < ?".freeze
-  VALID_NAME_REGEX = /^[A-Za-z][A-Za-z0-9_-]*$/.freeze
-  VALID_NAME_SANITIZER_REGEX = /^[^A-Za-z]*([A-Za-z0-9_-]+)/.freeze
+  VALID_NAME_REGEX = /^[A-Za-z][A-Za-z0-9_-]*$/
+  VALID_NAME_SANITIZER_REGEX = /^[^A-Za-z]*([A-Za-z0-9_-]+)/
   # Scopes
   scope :ordered, -> { order(ORDERING) }
   scope :released, ->(as_of = Time.current) { where(RELEASED, as_of) }
@@ -90,12 +90,12 @@ class Assessment < ApplicationRecord
     self_index > 0 ? sorted_asmts[self_index - 1] : nil
   end
 
-  def before_grading_deadline?
-    Time.current <= grading_deadline
-  end
-
   def folder_path
     Rails.root.join("courses", course.name, name)
+  end
+
+  def asmt_yaml_path
+    path "#{name}.yml"
   end
 
   def handout_path
@@ -104,6 +104,10 @@ class Assessment < ApplicationRecord
 
   def handin_directory_path
     path handin_directory
+  end
+
+  def log_path
+    path "log.txt"
   end
 
   def writeup_path
@@ -197,7 +201,11 @@ class Assessment < ApplicationRecord
   def construct_folder
     # this should construct the assessment folder and the handin folder
     FileUtils.mkdir_p(handin_directory_path)
-    dump_yaml if construct_default_config_file
+    constructed_default_config_file = construct_default_config_file
+    if constructed_default_config_file
+      dump_yaml
+    end
+    constructed_default_config_file
   end
 
   ##
@@ -214,7 +222,6 @@ class Assessment < ApplicationRecord
 
     # Update with this assessment information
     config_source.gsub!("##NAME_CAMEL##", unique_config_module_name)
-    config_source.gsub!("##NAME_LOWER##", name)
     # Write the new config out to the right file.
     File.open(assessment_config_file_path, "w") { |f| f.write(config_source) }
     true
@@ -227,28 +234,15 @@ class Assessment < ApplicationRecord
   # WILL NOT WORK ON NEW, UNSAVED ASSESSMENTS!!!
   #
   def load_config_file
-    # migrate old source config file path, in dir check to ensure that we are not trying to migrate
-    # a different module in a different folder that has a asmt name that maps to the old system
-    if (File.exist? source_config_file_path) &&
-       (source_config_file_path != unique_source_config_file_path) &&
-       Archive.in_dir?(source_config_file_path, folder_path)
-      # read from source
-      config_source = File.open(source_config_file_path, "r", &:read)
-      RubyVM::InstructionSequence.compile(config_source)
-      # rename module name if it doesn't match new unique naming scheme
-      if config_source !~ /\b#{unique_config_module_name}\b/
-        match = config_source.match(/module\s+(\w+)/)
-        config_source = config_source.sub(match[0], "module #{unique_config_module_name}")
-      end
-      File.open(unique_source_config_file_path, "w"){ |f| f.write(config_source) }
-      File.rename(source_config_file_path, source_config_file_backup_path)
-    end
-
     # read from source
     config_source = File.open(unique_source_config_file_path, "r", &:read)
 
     # validate syntax of config
-    RubyVM::InstructionSequence.compile(config_source)
+    begin
+      RubyVM::InstructionSequence.compile(config_source)
+    rescue SyntaxError => e
+      raise StandardError, e
+    end
 
     # ensure source_config_module_name is an actual module in the assessment config rb file
     # otherwise loading the file on subsequent calls to config_module will result in an exception
@@ -256,7 +250,17 @@ class Assessment < ApplicationRecord
     # uniquely rename module (so that it's unique among all assessment modules loaded in Autolab)
     if config_source !~ /\b#{unique_config_module_name}\b/
       match = config_source.match(/module\s+(\w+)/)
-      config_source = config_source.sub(match[0], "module #{unique_config_module_name}")
+      if match.nil?
+        # no module found in the source, so we will add a template config to assessmentConfig
+        # (assuming that there is no important code, since there isn't even a module)
+
+        # Open and read the default assessment config file, fill in with assessment name
+        default_config_file_path = Rails.root.join("lib/__defaultAssessment.rb")
+        config_source = File.open(default_config_file_path, "r", &:read)
+        config_source.gsub!("##NAME_CAMEL##", unique_config_module_name)
+      else
+        config_source = config_source.sub(match[0], "module #{unique_config_module_name}")
+      end
     end
 
     # backup old *unique* configs
@@ -271,6 +275,7 @@ class Assessment < ApplicationRecord
 
     # config file might have an updated custom raw score function: clear raw score cache
     invalidate_raw_scores
+    dump_yaml
     logger.info "Loaded #{unique_config_file_path}"
   end
 
@@ -292,7 +297,7 @@ class Assessment < ApplicationRecord
   # writes the properties of the assessment in YAML format to the assessment's yaml file
   #
   def dump_yaml
-    File.open(path("#{name}.yml"), "w") { |f| f.write(YAML.dump(sort_hash(serialize))) }
+    File.open(asmt_yaml_path, "w") { |f| f.write(YAML.dump(sort_hash(serialize))) }
   end
 
   ##
@@ -302,7 +307,7 @@ class Assessment < ApplicationRecord
   def load_yaml
     return unless new_record?
 
-    props = YAML.safe_load(File.open(path("#{name}.yml"), "r", &:read))
+    props = YAML.safe_load(File.open(asmt_yaml_path, "r", &:read))
     backwards_compatibility(props)
     deserialize(props)
   end
@@ -372,8 +377,13 @@ class Assessment < ApplicationRecord
     overwrites_method?(:handout) || handout_is_url? || handout_is_file?
   end
 
-  def groups
-    Group.joins(:assessment_user_data).where(assessment_user_data: { assessment_id: id }).distinct
+  def groups(show_members: false)
+    if show_members
+      Group.includes(assessment_user_data: { course_user_datum: :user })
+           .where(assessment_user_data: { assessment_id: id })
+    else
+      Group.joins(:assessment_user_data).where(assessment_user_data: { assessment_id: id }).distinct
+    end
   end
 
   def grouplessCUDs
@@ -412,24 +422,53 @@ class Assessment < ApplicationRecord
 
   # name is already sanitized during the creation process
   def unique_source_config_file_path
-    Rails.root.join("courses", course.name, name, "#{name}.rb")
+    path "#{name}.rb"
   end
 
   def source_config_file_backup_path
     source_config_file_path.sub_ext(".rb.bak")
   end
 
+  def date_to_s(date)
+    date.strftime("%b %e at %l:%M%P")
+  end
+
+  def load_dir_to_tar(dir_path, asmt_dir, tar, filters = [], export_dir = "")
+    Dir[File.join(dir_path, asmt_dir, "**")].each do |file|
+      mode = File.stat(file).mode
+      relative_path = file.sub(%r{^#{Regexp.escape dir_path}/?}, "")
+      export_path = if export_dir == ""
+                      relative_path
+                    else
+                      File.join(export_dir, relative_path)
+                    end
+
+      if File.directory?(file)
+        if filters.all? { |filter|
+          !Archive.in_dir?(Pathname.new(filter), Pathname.new(file), strict: false)
+        }
+          tar.mkdir export_path, mode
+          load_dir_to_tar(dir_path, relative_path, tar, filters, export_dir)
+        end
+      else
+        tar.add_file export_path, mode do |tarFile|
+          File.open(file, "rb") { |f| tarFile.write f.read }
+        end
+      end
+    end
+  end
+
 private
 
   def saved_change_to_grade_related_fields?
-    (saved_change_to_due_at? or saved_change_to_max_grace_days? or
-            saved_change_to_version_threshold? or
-            saved_change_to_late_penalty_id? or
-            saved_change_to_version_penalty_id?)
+    saved_change_to_due_at? or saved_change_to_max_grace_days? or
+      saved_change_to_version_threshold? or
+      saved_change_to_late_penalty_id? or
+      saved_change_to_version_penalty_id?
   end
 
   def saved_change_to_due_at_or_max_grace_days?
-    (saved_change_to_due_at? or saved_change_to_max_grace_days?)
+    saved_change_to_due_at? or saved_change_to_max_grace_days?
   end
 
   def path(filename)
@@ -517,58 +556,65 @@ private
     # can do so easily
     s["dates"] = { start_at: start_at.to_s,
                    due_at: due_at.to_s,
-                   end_at: end_at.to_s,
-                   grading_deadline: grading_deadline.to_s }.deep_stringify_keys
+                   end_at: end_at.to_s }.deep_stringify_keys
     s
   end
 
-  GENERAL_SERIALIZABLE = Set.new %w[name display_name category_name description handin_filename
-                                    handin_directory has_svn has_lang max_grace_days handout
+  GENERAL_SERIALIZABLE = Set.new %w[display_name category_name description handin_filename
+                                    handin_directory max_grace_days handout
                                     writeup max_submissions disable_handins max_size
                                     version_threshold is_positive_grading embedded_quiz group_size
                                     github_submission_enabled allow_student_assign_group
-                                    is_positive_grading]
+                                    is_positive_grading disable_network]
 
   def serialize_general
     Utilities.serializable attributes, GENERAL_SERIALIZABLE
   end
 
   def deserialize(s)
-    unless s["general"] && (s["general"]["name"] == name)
-      raise "Name in yaml (#{s['general']['name']}) doesn't match #{name}"
+    unless s["general"]
+      raise "General section missing in yaml"
     end
 
     if s["dates"] && s["dates"]["start_at"]
-      if s["dates"]["due_at"] && s["dates"]["end_at"] && s["dates"]["grading_deadline"]
+      if s["dates"]["due_at"] && s["dates"]["end_at"]
         self.due_at = Time.zone.parse(s["dates"]["due_at"])
         self.start_at = Time.zone.parse(s["dates"]["start_at"])
         self.end_at = Time.zone.parse(s["dates"]["end_at"])
-        self.grading_deadline = Time.zone.parse(s["dates"]["grading_deadline"])
       else
-        self.due_at = self.end_at = self.start_at = self.grading_deadline =
-                                      Time.zone.parse(s["dates"]["start_at"])
+        self.due_at = self.end_at = self.start_at = Time.zone.parse(s["dates"]["start_at"])
       end
     else
-      self.due_at = self.end_at = self.start_at = self.grading_deadline = Time.current + 1.day
+      self.due_at = self.end_at = self.start_at = Time.current + 1.day
     end
 
     self.quiz = false
     self.quizData = ""
     update!(s["general"])
     Problem.deserialize_list(self, s["problems"]) if s["problems"]
-    Autograder.find_or_initialize_by(assessment_id: id).update(s["autograder"]) if s["autograder"]
-    Scoreboard.find_or_initialize_by(assessment_id: id).update(s["scoreboard"]) if s["scoreboard"]
 
-    # rubocop:disable Style/GuardClause
+    if s["autograder"]
+      autograder = Autograder.find_or_initialize_by(assessment_id: id)
+      autograder.update(s["autograder"])
+      self.autograder = autograder
+    end
+    if s["scoreboard"]
+      scoreboard = Scoreboard.find_or_initialize_by(assessment_id: id)
+      scoreboard.update(s["scoreboard"])
+      self.scoreboard = scoreboard
+    end
     if s["late_penalty"]
       late_penalty ||= Penalty.new
       late_penalty.update(s["late_penalty"])
+      self.late_penalty = late_penalty
     end
     if s["version_penalty"]
       version_penalty ||= Penalty.new
       version_penalty.update(s["version_penalty"])
+      self.version_penalty = version_penalty
     end
-    # rubocop:enable Style/GuardClause
+    # necessary for penaltu data to be saved properly
+    save!
   end
 
   def default_max_score
@@ -593,7 +639,6 @@ private
   def verify_dates_order
     errors.add :due_at, "must be after the start date" if start_at > due_at
     errors.add :end_at, "must be after the due date" if due_at > end_at
-    errors.add :grading_deadline, "must be after the end date" if end_at > grading_deadline
   end
 
   def handin_directory_and_filename_or_disable_handins
@@ -670,8 +715,9 @@ private
                  "handout_filename" => "handout",
                  "writeup_filename" => "writeup",
                  "has_autograde" => nil,
-                 "has_scoreboard" => nil }.freeze
-  BACKWORDS_COMPATIBILITY = { "autograding_setup" => "autograder",
+                 "has_scoreboard" => nil,
+                 "has_svn" => nil }.freeze
+  BACKWARDS_COMPATIBILITY = { "autograding_setup" => "autograder",
                               "scoreboard_setup" => "scoreboard" }.freeze
   def backwards_compatibility(props)
     GENERAL_BC.each do |old, new|
@@ -680,7 +726,7 @@ private
       props["general"][new] = props["general"][old] unless new.nil?
       props["general"].delete(old)
     end
-    BACKWORDS_COMPATIBILITY.each do |old, new|
+    BACKWARDS_COMPATIBILITY.each do |old, new|
       next unless props.key?(old)
 
       props[new] = props[old]

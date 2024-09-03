@@ -67,7 +67,6 @@ namespace :autolab do
           a.start_at = start
           a.due_at = start + (5 + rand(11)).days          # 5-15d after start date
           a.end_at = a.due_at + (1 + rand(7)).day   # 1d-1w after the due date
-          a.grading_deadline = a.end_at + (1 + rand(7)).day   # 1-7d after submit deadline
 
           a.name = "#{cat}#{i.to_s}".downcase
           a.display_name = "#{cat} #{i.to_s}"
@@ -327,8 +326,6 @@ namespace :autolab do
       problem_string = "@problems = [#{problem_hashes}]"
 
       config_file_string = assessment_template.gsub("##NAME_CAMEL##", a.name.downcase.capitalize)
-                                              .gsub("##NAME_LOWER##", a.name)
-                                              .gsub("##PROBLEMS##", problem_string)
 
       config_file_path = File.join(assessment_dir, "#{a.name}.rb")
       File.open(config_file_path, "w") do |f|
@@ -351,7 +348,6 @@ namespace :autolab do
       a.start_at = COURSE_START
       a.due_at = COURSE_START + (5 + rand(11)).days
       a.end_at = a.due_at + (1 + rand(7)).day
-      a.grading_deadline = a.end_at + (1 + rand(7)).day
 
       a.name = AUTOGRADE_TEMPLATE_NAME
       a.display_name = AUTOGRADE_TEMPLATE_DISPLAY_NAME
